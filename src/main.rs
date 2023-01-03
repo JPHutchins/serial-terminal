@@ -18,10 +18,10 @@ mod serial_connection;
 use crate::arg_helpers::{
     valid_baud, valid_data_bits, valid_flow_control, valid_parity, valid_stop_bits, CLIDisplay,
 };
-use crate::constants::{ABOUT, HELP};
+use crate::constants::{ABOUT, HELP, LONG_VERSION};
 
 #[derive(Parser, Debug)]
-#[command(author, version, about = ABOUT, long_about = concatcp!(ABOUT, "\n\n", HELP))]
+#[command(author, version, long_version = LONG_VERSION, about = ABOUT, long_about = concatcp!(ABOUT, "\n\n", HELP))]
 pub struct Args {
     #[arg(help = "Path to the serial port, e.g. 'COM1' or '/dev/ttyUSB0'")]
     port: String,
