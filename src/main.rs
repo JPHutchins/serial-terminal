@@ -97,13 +97,14 @@ async fn io_tasks(args: Args) {
                         match event {
                             Event::Key(key) => {
                                 if key.modifiers.contains(KeyModifiers::CONTROL) {
-                                    break;
+                                    if let KeyCode::Char(code) = key.code {
+                                        if code == 'c' {
+                                            break;
+                                        }
+                                    }
                                 }
 
                                 if let KeyCode::Char(code) = key.code {
-                                    if code as u8 == 0x03 {
-                                        break;
-                                    }
                                     display_buf[0] = code as u8;
                                     serial_connection.write(&display_buf).unwrap();
                                 }
