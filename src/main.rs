@@ -101,6 +101,11 @@ async fn io_tasks(args: Args) {
 
                             },
                             KeyboardInputAction::CtrlC => break,
+                            KeyboardInputAction::Enter => {
+                                display_buf[0] = '\r' as u8;
+                                let enter_buf: [u8; 2] = ['\r' as u8, '\n' as u8];
+                                serial_connection.write(&enter_buf).unwrap();
+                            }
                             KeyboardInputAction::Esc => {println!("TODO: menu"); break},
                             KeyboardInputAction::NoAction => continue,
                         }
@@ -125,6 +130,7 @@ async fn io_tasks(args: Args) {
 enum KeyboardInputAction {
     Char(char),
     CtrlC,
+    Enter,
     Esc,
     NoAction,
 }
@@ -142,6 +148,7 @@ fn handle_keypress_event(event: Event) -> KeyboardInputAction {
             }
             match key.code {
                 KeyCode::Char(code) => KeyboardInputAction::Char(code),
+                KeyCode::Enter => KeyboardInputAction::Enter,
                 KeyCode::Esc => KeyboardInputAction::Esc,
                 _ => KeyboardInputAction::NoAction,
             }
