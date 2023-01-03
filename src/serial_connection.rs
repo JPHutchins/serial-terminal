@@ -9,7 +9,7 @@ use crate::Args;
 /// * `args` - The struct Args that contains the CLI options
 ///
 pub fn get_serial_connection(args: Args) -> SerialStream {
-    let serial_connection = tokio_serial::new(args.port, args.baud)
+    let mut serial_connection = tokio_serial::new(args.port, args.baud)
         .data_bits(args.data_bits.value)
         .flow_control(args.flow_control.value)
         .parity(args.parity.value)
