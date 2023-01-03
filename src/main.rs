@@ -94,27 +94,15 @@ async fn io_tasks(args: Args) {
             event = keypress_event => {
                 match event {
                     Some(Ok(event)) => {
-                        match event {
-                            Event::Key(key) => {
-                                if key.modifiers.contains(KeyModifiers::CONTROL) {
-                                    if let KeyCode::Char(code) = key.code {
-                                        if code == 'c' {
-                                            break;
-                                        }
-                                    }
-                                }
+                        match handle_keypress_event(event) {
+                            KeyboardInputAction::Char(code) => {
+                                display_buf[0] = code as u8;
+                                serial_connection.write(&display_buf).unwrap();
 
-                                if let KeyCode::Char(code) = key.code {
-                                    display_buf[0] = code as u8;
-                                    serial_connection.write(&display_buf).unwrap();
-                                }
-                            }
-                            _ => continue
-
-                        }
-
-                        if event == Event::Key(KeyCode::Esc.into()) {
-                            break;
+                            },
+                            KeyboardInputAction::CtrlC => break,
+                            KeyboardInputAction::Esc => {println!("TODO: menu"); break},
+                            KeyboardInputAction::NoAction => continue,
                         }
                     }
                     Some(Err(e)) => println!("Error: {:?}\r", e),
@@ -131,5 +119,37 @@ async fn io_tasks(args: Args) {
                 }
             }
         };
+    }
+}
+
+enum KeyboardInputAction {
+    Char(char),
+    CtrlC,
+    Esc,
+    NoAction,
+}
+
+fn handle_keypress_event(event: Event) -> KeyboardInputAction {
+    match event {
+        Event::Key(key) => {
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                if let KeyCode::Char(code) = key.code {
+                    if code == 'c' {
+                        return KeyboardInputAction::CtrlC;
+                    }
+                }
+                return KeyboardInputAction::NoAction; // don't handle other Ctrl-* for now
+            }
+            match key.code {
+                KeyCode::Char(code) => KeyboardInputAction::Char(code),
+                KeyCode::Esc => KeyboardInputAction::Esc,
+                _ => KeyboardInputAction::NoAction,
+            }
+        }
+        Event::FocusGained
+        | Event::FocusLost
+        | Event::Mouse(_)
+        | Event::Resize(_, _)
+        | Event::Paste(_) => KeyboardInputAction::NoAction,
     }
 }
