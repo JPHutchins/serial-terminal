@@ -20,7 +20,6 @@ pub fn get_serial_connection(args: &Args) -> Option<SerialStream> {
         Ok(serial_connection) => {
             #[cfg(unix)]
             serial_connection
-                .unwrap()
                 .set_exclusive(false)
                 .expect("Unable to set serial port exclusive to false");
 
