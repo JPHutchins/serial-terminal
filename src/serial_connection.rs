@@ -17,7 +17,7 @@ pub fn get_serial_connection(args: &Args) -> Option<SerialStream> {
         .open_native_async();
 
     match serial_connection_res {
-        Ok(serial_connection) => {
+        Ok(mut serial_connection) => {
             #[cfg(unix)]
             serial_connection
                 .set_exclusive(false)
