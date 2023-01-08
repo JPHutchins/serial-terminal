@@ -29,6 +29,12 @@ Options:
 * Rust and Cargo: https://www.rust-lang.org/tools/install
   * Test the Rust and Cargo install: https://doc.rust-lang.org/book/ch01-00-getting-started.html
 
+### Linux
+
+* serialport-rs dependencies https://github.com/serialport/serialport-rs
+  * Ubuntu: `sudo apt install libudev-dev`
+  * Fedora: `sudo dnf install systemd-devel`
+
 ## Setup
 
 * Create a fork of this repository: https://github.com/JPHutchins/serial-terminal/fork
