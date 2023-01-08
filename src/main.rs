@@ -84,7 +84,6 @@ async fn io_tasks(args: Args) {
     let mut serial_connection = serial_connection::get_serial_connection(args);
 
     let mut rx_buf: [u8; 1] = [0; 1];
-    let mut display_buf: [u8; 1] = [0; 1];
 
     loop {
         let mut keypress_event = reader.next().fuse();
@@ -95,18 +94,13 @@ async fn io_tasks(args: Args) {
                 match event {
                     Some(Ok(event)) => {
                         match handle_keypress_event(event) {
-                            KeyboardInputAction::Char(code) => {
-                                display_buf[0] = code as u8;
-                                serial_connection.write(&display_buf).unwrap();
-
-                            },
-                            KeyboardInputAction::CtrlC => break,
-                            KeyboardInputAction::Enter => {
-                                display_buf[0] = '\r' as u8;
-                                let enter_buf: [u8; 2] = ['\r' as u8, '\n' as u8];
-                                serial_connection.write(&enter_buf).unwrap();
+                            KeyboardInputAction::Menu => {println!("TODO: menu"); break},
+                            KeyboardInputAction::OneByteCode(byte) => {
+                                serial_connection.write(&byte).unwrap();
                             }
-                            KeyboardInputAction::Esc => {println!("TODO: menu"); break},
+                            KeyboardInputAction::TwoByteCode(bytes) => {
+                                serial_connection.write(&bytes).unwrap();
+                            }
                             KeyboardInputAction::NoAction => continue,
                         }
                     }
@@ -120,7 +114,9 @@ async fn io_tasks(args: Args) {
                         print!("{}", rx_buf[0] as char);
                         io::stdout().flush().unwrap();
                     }
-                    Err(e) => println!("Error: {:?}\r", e)
+                    Err(e) => {
+                        println!("Error: {:?}\r", e);
+                    }
                 }
             }
         };
@@ -128,11 +124,10 @@ async fn io_tasks(args: Args) {
 }
 
 enum KeyboardInputAction {
-    Char(char),
-    CtrlC,
-    Enter,
-    Esc,
+    Menu,
     NoAction,
+    OneByteCode([u8; 1]),
+    TwoByteCode([u8; 2]),
 }
 
 fn handle_keypress_event(event: Event) -> KeyboardInputAction {
@@ -141,15 +136,26 @@ fn handle_keypress_event(event: Event) -> KeyboardInputAction {
             if key.modifiers.contains(KeyModifiers::CONTROL) {
                 if let KeyCode::Char(code) = key.code {
                     if code == 'c' {
-                        return KeyboardInputAction::CtrlC;
+                        return KeyboardInputAction::OneByteCode([0x03]);
+                    }
+                    if code == 't' {
+                        return KeyboardInputAction::Menu;
                     }
                 }
                 return KeyboardInputAction::NoAction; // don't handle other Ctrl-* for now
             }
             match key.code {
-                KeyCode::Char(code) => KeyboardInputAction::Char(code),
-                KeyCode::Enter => KeyboardInputAction::Enter,
-                KeyCode::Esc => KeyboardInputAction::Esc,
+                KeyCode::Char(code) => KeyboardInputAction::OneByteCode([code as u8]),
+                KeyCode::Enter => KeyboardInputAction::OneByteCode([b'\r']),
+                KeyCode::Esc => KeyboardInputAction::OneByteCode([0x1B]),
+                KeyCode::Up => KeyboardInputAction::TwoByteCode([0x1B, b'A']),
+                KeyCode::Down => KeyboardInputAction::TwoByteCode([0x1B, b'B']),
+                KeyCode::Left => KeyboardInputAction::TwoByteCode([0x1B, b'C']),
+                KeyCode::Right => KeyboardInputAction::TwoByteCode([0x1B, b'D']),
+                KeyCode::Tab => KeyboardInputAction::OneByteCode([b'\t']),
+                KeyCode::Backspace => KeyboardInputAction::OneByteCode([0x08]),
+                KeyCode::Delete => KeyboardInputAction::OneByteCode([0x7F]),
+                KeyCode::Null => KeyboardInputAction::OneByteCode([0x00]),
                 _ => KeyboardInputAction::NoAction,
             }
         }

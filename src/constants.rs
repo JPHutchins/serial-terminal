@@ -3,7 +3,7 @@ use const_format::formatcp;
 pub const ABOUT: &str = "\
     A cross platform CLI for serial devices.\n\
     \n\
-    Press ESC to bring up menu or Ctrl-C to exit.\
+    Press Ctrl-t to bring up the menu and exit.\
 ";
 
 pub const HELP: &str = "\
