@@ -1,18 +1,26 @@
 use const_format::concatcp;
+use crossterm::style::Print;
 use futures::stream::StreamExt;
 use futures::{future::FutureExt, select};
-use std::{
-    io::{self, Write},
-    process::exit,
+use std::format;
+use std::io::{
+    self, stdout,
+    ErrorKind::{PermissionDenied, TimedOut},
+    Write,
 };
+use std::time::SystemTime;
 
 use clap::{error::ContextKind::InvalidArg, error::ContextValue, Parser};
 use crossterm::{
+    cursor::{Hide, MoveLeft, Show},
     event::{Event, EventStream, KeyCode, KeyModifiers},
+    execute, queue,
     terminal::{disable_raw_mode, enable_raw_mode},
 };
 use tokio::io::AsyncReadExt;
 use tokio_serial::{DataBits, FlowControl, Parity, StopBits};
+
+use terminal_spinner_data::{SpinnerData, DOTS12};
 
 mod arg_helpers;
 mod constants;
@@ -116,6 +124,14 @@ async fn io_tasks(args: Args) {
 
     let mut rx_buf: [u8; 1] = [0; 1];
 
+    let mut conn_retries = 0;
+
+    let mut stdout = stdout();
+
+    const ANIMATION: SpinnerData = DOTS12;
+    let mut last_animation_time = SystemTime::now();
+    let mut previous_frame_size = ANIMATION.frames[0].chars().count();
+
     loop {
         let mut keypress_event = reader.next().fuse();
         let mut serial_rx_event = Box::pin(serial_conn.read_exact(&mut rx_buf).fuse());
@@ -145,8 +161,48 @@ async fn io_tasks(args: Args) {
                         print!("{}", rx_buf[0] as char);
                         io::stdout().flush().unwrap();
                     }
-                    Err(e) => {
-                        println!("Error: {:?}\r", e);
+                    Err(error) => {
+                        match error.kind() {
+                            PermissionDenied | TimedOut => {
+                                serial_conn = match serial_connection::get_serial_connection(&args) {
+                                    Some(serial_conn) => {
+                                        conn_retries = 0;
+                                        execute!(
+                                            stdout,
+                                            MoveLeft(previous_frame_size.try_into().unwrap()),
+                                            Print("  "),
+                                            Print(format!("\r\nReconnected to {}\r\n", args.port)),
+                                            Show
+                                        ).unwrap();
+                                        serial_conn
+                                    },
+                                    None => {
+                                        if conn_retries == 0 {
+                                            queue!(
+                                                stdout,
+                                                Hide,
+                                                Print(format!("Lost connection to {}  ", args.port)),
+                                                Print(ANIMATION.frames[0]),
+                                            ).unwrap();
+                                            conn_retries += 1;
+                                        } else if last_animation_time.elapsed().unwrap().as_millis() >= ANIMATION.interval.into() {
+                                            let frame = ANIMATION.frames[conn_retries % ANIMATION.frames.len()];
+                                            queue!(
+                                                stdout,
+                                                MoveLeft(previous_frame_size.try_into().unwrap()),
+                                                Print(frame),
+                                            ).unwrap();
+                                            previous_frame_size = frame.chars().count();
+                                            conn_retries += 1;
+                                            last_animation_time = SystemTime::now();
+                                        }
+                                        io::stdout().flush().unwrap();
+                                        serial_conn
+                                    }
+                                };
+                            },
+                            _ => println!("Serial RX Error: {:?}\r", error)
+                        }
                     }
                 }
             }
