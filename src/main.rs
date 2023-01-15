@@ -3,7 +3,7 @@ use futures::{future::FutureExt, pin_mut, select, stream::StreamExt};
 use std::{
     format,
     io::{
-        self, Error,
+        self,
         ErrorKind::{PermissionDenied, TimedOut, WouldBlock},
         Write,
     },
@@ -11,7 +11,7 @@ use std::{
 
 use clap::{error::ContextKind::InvalidArg, error::ContextValue, Parser};
 use crossterm::{
-    event::{Event, EventStream, KeyCode, KeyModifiers},
+    event::EventStream,
     terminal::{disable_raw_mode, enable_raw_mode},
 };
 use tokio::io::AsyncReadExt;
@@ -19,6 +19,7 @@ use tokio_serial::{DataBits, FlowControl, Parity, SerialStream, StopBits};
 
 mod arg_helpers;
 mod constants;
+mod keyboard_input;
 mod list_ports;
 mod log_to_ui;
 mod serial_connection;
@@ -27,6 +28,7 @@ use crate::arg_helpers::{
     valid_baud, valid_data_bits, valid_flow_control, valid_parity, valid_stop_bits, CLIDisplay,
 };
 use crate::constants::{ABOUT, HELP, LONG_VERSION};
+use crate::keyboard_input::{handle_keypress_event, KeyboardInputAction};
 use crate::list_ports::list_ports;
 use crate::log_to_ui::{log_to_ui, print_log_to_stdout};
 use crate::serial_connection::wait_for_serial_port;
@@ -173,57 +175,5 @@ async fn io_tasks(args: Args) {
                 },
             };
         }
-    }
-}
-
-enum KeyboardInputAction {
-    Chars(Vec<u8>),
-    KeypressError,
-    Menu,
-    NoAction,
-}
-
-fn handle_keypress_event(event: &Option<Result<Event, Error>>) -> KeyboardInputAction {
-    match event {
-        Some(Ok(event)) => handle_event(&event),
-        Some(Err(_)) => KeyboardInputAction::KeypressError,
-        None => KeyboardInputAction::KeypressError,
-    }
-}
-
-fn handle_event(event: &Event) -> KeyboardInputAction {
-    match event {
-        Event::Key(key) => {
-            if key.modifiers.contains(KeyModifiers::CONTROL) {
-                if let KeyCode::Char(code) = key.code {
-                    if code == 'c' {
-                        return KeyboardInputAction::Chars(vec![0x03]);
-                    }
-                    if code == 't' {
-                        return KeyboardInputAction::Menu;
-                    }
-                }
-                return KeyboardInputAction::NoAction; // don't handle other Ctrl-* for now
-            }
-            match key.code {
-                KeyCode::Char(code) => KeyboardInputAction::Chars(vec![code as u8]),
-                KeyCode::Enter => KeyboardInputAction::Chars(vec![b'\r']),
-                KeyCode::Esc => KeyboardInputAction::Chars(vec![0x1B]),
-                KeyCode::Up => KeyboardInputAction::Chars(vec![0x1B, b'[', b'A']),
-                KeyCode::Down => KeyboardInputAction::Chars(vec![0x1B, b'[', b'B']),
-                KeyCode::Left => KeyboardInputAction::Chars(vec![0x1B, b'[', b'C']),
-                KeyCode::Right => KeyboardInputAction::Chars(vec![0x1B, b'[', b'D']),
-                KeyCode::Tab => KeyboardInputAction::Chars(vec![b'\t']),
-                KeyCode::Backspace => KeyboardInputAction::Chars(vec![0x08]),
-                KeyCode::Delete => KeyboardInputAction::Chars(vec![0x7F]),
-                KeyCode::Null => KeyboardInputAction::Chars(vec![0x00]),
-                _ => KeyboardInputAction::NoAction,
-            }
-        }
-        Event::FocusGained
-        | Event::FocusLost
-        | Event::Mouse(_)
-        | Event::Resize(_, _)
-        | Event::Paste(_) => KeyboardInputAction::NoAction,
     }
 }
