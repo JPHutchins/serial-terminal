@@ -113,6 +113,7 @@ fn main() {
 async fn io_tasks(args: Args) {
     let mut reader = EventStream::new();
     let mut rx_buf: [u8; 1] = [0; 1];
+    let mut stdout = io::stdout();
 
     let connect_event_fut = wait_for_serial_port(&args, None).fuse();
     pin_mut!(connect_event_fut);
@@ -160,7 +161,7 @@ async fn io_tasks(args: Args) {
                     match event {
                         Ok(_) => {
                             print!("{}", rx_buf[0] as char);
-                            io::stdout().flush().unwrap();
+                            stdout.flush().unwrap();
                         }
                         Err(error) => {
                             match error.kind() {
