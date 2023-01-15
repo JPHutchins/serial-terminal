@@ -3,32 +3,24 @@ use futures::{future::FutureExt, pin_mut, select, stream::StreamExt};
 use std::{
     format,
     io::{
-        self, stdout, Error, ErrorKind,
+        self, Error,
         ErrorKind::{PermissionDenied, TimedOut, WouldBlock},
         Write,
     },
-    time::Duration,
 };
 
-use chrono;
 use clap::{error::ContextKind::InvalidArg, error::ContextValue, Parser};
 use crossterm::{
-    cursor::{Hide, MoveLeft, MoveUp, Show},
     event::{Event, EventStream, KeyCode, KeyModifiers},
-    execute, queue,
-    style::{
-        Color::{DarkGrey, Reset, White},
-        Print, SetBackgroundColor, SetForegroundColor,
-    },
     terminal::{disable_raw_mode, enable_raw_mode},
 };
-use terminal_spinner_data::{SpinnerData, DOTS12};
 use tokio::io::AsyncReadExt;
 use tokio_serial::{DataBits, FlowControl, Parity, SerialStream, StopBits};
 
 mod arg_helpers;
 mod constants;
 mod list_ports;
+mod log_to_ui;
 mod serial_connection;
 
 use crate::arg_helpers::{
@@ -36,6 +28,8 @@ use crate::arg_helpers::{
 };
 use crate::constants::{ABOUT, HELP, LONG_VERSION};
 use crate::list_ports::list_ports;
+use crate::log_to_ui::{log_to_ui, print_log_to_stdout};
+use crate::serial_connection::wait_for_serial_port;
 
 #[derive(Parser, Debug)]
 #[command(author, version, long_version = LONG_VERSION, about = ABOUT, long_about = concatcp!(ABOUT, "\n\n", HELP))]
@@ -180,88 +174,6 @@ async fn io_tasks(args: Args) {
             };
         }
     }
-}
-
-async fn wait_for_serial_port(args: &Args, error_kind: Option<ErrorKind>) -> SerialStream {
-    const ANIMATION: SpinnerData = DOTS12;
-
-    let mut is_first_retry = true;
-    let mut stdout = stdout();
-    let mut frame_iter = ANIMATION.frames.into_iter();
-    let mut frame = frame_iter.next().unwrap();
-    let mut previous_frame_size = frame.chars().count();
-
-    loop {
-        match serial_connection::get_serial_connection(&args) {
-            Some(serial_conn) => {
-                execute!(
-                    // clear the animation and move up so log is on next line
-                    stdout,
-                    MoveLeft(previous_frame_size.try_into().unwrap()),
-                    Print("     "),
-                    MoveUp(1),
-                )
-                .unwrap();
-                log_to_ui!("Connected to {}", args.port);
-                execute!(stdout, Show).unwrap();
-                break serial_conn;
-            }
-            None => {
-                if is_first_retry {
-                    match error_kind {
-                        Some(error_kind) => {
-                            log_to_ui!("{} error '{}', waiting", args.port, error_kind)
-                        }
-                        None => log_to_ui!("Waiting for {}", args.port),
-                    };
-                    queue!(stdout, Print(frame), Hide).unwrap();
-                    is_first_retry = false;
-                } else {
-                    // let frame = ANIMATION.frames[conn_retries % ANIMATION.frames.len()];
-                    frame = match frame_iter.next() {
-                        Some(frame) => frame,
-                        None => {
-                            // restart the iterator
-                            frame_iter = ANIMATION.frames.into_iter();
-                            frame_iter.next().unwrap()
-                        }
-                    };
-                    queue!(
-                        stdout,
-                        MoveLeft(previous_frame_size.try_into().unwrap()),
-                        Print(frame),
-                    )
-                    .unwrap();
-                    previous_frame_size = frame.chars().count();
-                }
-                io::stdout().flush().unwrap();
-            }
-        };
-        tokio::time::sleep(Duration::from_millis(80)).await;
-    }
-}
-
-#[macro_export]
-macro_rules! log_to_ui {
-    ( $ ( $arg:tt ) * ) => {{
-        let msg = format!($($arg)*);
-        execute!(
-            stdout(),
-            Hide,
-            SetBackgroundColor(DarkGrey),
-            SetForegroundColor(White),
-            Print(format!(
-                "\r\n[{}] ",
-                chrono::offset::Local::now().format("%H:%M:%S%.3f")
-            )),
-            Print(msg),
-            SetBackgroundColor(Reset),
-            SetForegroundColor(Reset),
-            Print("\r\n"),
-            Show,
-        )
-        .unwrap();
-    }}
 }
 
 enum KeyboardInputAction {
