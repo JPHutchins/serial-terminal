@@ -11,8 +11,11 @@ use std::{
 
 use clap::{error::ContextKind::InvalidArg, error::ContextValue, Parser};
 use crossterm::{
+    cursor,
     event::EventStream,
-    terminal::{disable_raw_mode, enable_raw_mode},
+    execute, queue,
+    style::Print,
+    terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType::CurrentLine},
 };
 use tokio::io::AsyncReadExt;
 use tokio_serial::{DataBits, FlowControl, Parity, SerialStream, StopBits};
@@ -22,6 +25,7 @@ mod constants;
 mod keyboard_input;
 mod list_ports;
 mod log_to_ui;
+mod menu;
 mod serial_connection;
 
 use crate::arg_helpers::{
@@ -110,6 +114,12 @@ fn main() {
     disable_raw_mode().unwrap();
 }
 
+enum EventType {
+    Menu,
+    SerialRX,
+    Initial,
+}
+
 async fn io_tasks(args: Args) {
     let mut reader = EventStream::new();
     let mut rx_buf: [u8; 1] = [0; 1];
@@ -119,6 +129,8 @@ async fn io_tasks(args: Args) {
     pin_mut!(connect_event_fut);
 
     'connection: loop {
+        stdout.flush().unwrap();
+
         let keypress_event = reader.next().fuse();
         pin_mut!(keypress_event);
 
@@ -133,35 +145,107 @@ async fn io_tasks(args: Args) {
                 };
             },
             event = connect_event_fut => {
-                serial_conn = event
+                serial_conn = event;
             },
         }
+
+        let mut menu_state = menu::MenuState::new(cursor::position().unwrap());
+        let mut serial_rx_cursor_position: (u16, u16) = cursor::position().unwrap();
+        let mut event_type = EventType::Initial;
 
         'communication: loop {
             let keypress_event = reader.next().fuse();
             let serial_rx_event = serial_conn.read_exact(&mut rx_buf).fuse();
             pin_mut!(keypress_event, serial_rx_event);
 
+            queue!(stdout, cursor::Hide).unwrap();
+
             select! {
                 event = keypress_event => {
                     match handle_keypress_event(&event) {
-                        KeyboardInputAction::Chars(bytes) => match serial_conn.write(&bytes) {
-                            Ok(_) => {},
-                            Err(error) => match error.kind() {
-                                WouldBlock => {},
-                                _ => log_to_ui!("Serial TX Error: {:?}", error)
+                        KeyboardInputAction::Chars(bytes) => {
+                            if menu_state.is_open {
+                                let event = event.unwrap().unwrap();
+                                menu_state = menu::handle_chars(menu_state, event);
+                                event_type = EventType::Menu;
+                                match menu_state.action {
+                                    None => {},
+                                    Some(menu::Action::Quit) => break 'connection,
+                                    Some(menu::Action::Timestamp) => {
+                                        // overwrite the menu line with the timestamp
+                                        queue!(
+                                            stdout,
+                                            cursor::MoveUp(1),
+                                        ).unwrap();
+                                        log_to_ui!(""); // blank log is just a timestamp
+
+                                        // then reprint the menu
+                                        menu_state = menu::newline(menu_state);
+                                        serial_rx_cursor_position = (
+                                            serial_rx_cursor_position.0,
+                                            menu_state.cursor_position.1 - 1);
+                                    },
+                                    Some(menu::Action::Help) => {
+                                        //TODO
+                                    }
+                                }
+                            } else {
+                                match serial_conn.write(&bytes) {
+                                    Ok(_) => {},
+                                    Err(error) => match error.kind() {
+                                        WouldBlock => {},
+                                        _ => log_to_ui!("Serial TX Error: {:?}", error)
+                                    }
+                                }
                             }
                         }
-                        KeyboardInputAction::KeypressError => {log_to_ui!("Keypress error"); break 'connection}
-                        KeyboardInputAction::Menu => break 'connection,
-                        KeyboardInputAction::NoAction => continue 'communication,
+                        KeyboardInputAction::KeypressError => {
+                            log_to_ui!("Keypress error");
+                            break 'connection
+                        }
+                        KeyboardInputAction::Menu => {
+                            if menu_state.is_open {
+                                menu_state = menu::close(menu_state);
+                                event_type = EventType::Initial;
+                            } else {
+                                menu_state = menu::newline(menu_state);
+                                serial_rx_cursor_position = (
+                                    serial_rx_cursor_position.0,
+                                    menu_state.cursor_position.1 - 1);
+                                event_type = EventType::Menu;
+                            }
+                        },
+                        KeyboardInputAction::NoAction => {},
                     };
                 },
                 event = serial_rx_event => {
                     match event {
                         Ok(_) => {
-                            print!("{}", rx_buf[0] as char);
-                            stdout.flush().unwrap();
+                            if menu_state.is_open && rx_buf[0] == '\n' as u8 {
+                                // move to the menu line and clear it
+                                queue!(
+                                    stdout,
+                                    cursor::MoveTo(0, menu_state.cursor_position.1),
+                                    Clear(CurrentLine),
+                                ).unwrap();
+
+                                // add the menu back
+                                menu_state = menu::newline(menu_state);
+
+                                // manually set the serial rx cursor up 1 row from the menu
+                                serial_rx_cursor_position = (0, menu_state.cursor_position.1 - 1);
+
+                                // no event, cursor positions handled manually
+                                event_type = EventType::Initial;
+                            } else {
+                                let (col, row) = serial_rx_cursor_position;
+                                queue!(
+                                    stdout,
+                                    cursor::MoveTo(col, row),
+                                    Print(rx_buf[0] as char),
+                                ).unwrap();
+                                event_type = EventType::SerialRX;
+                            }
                         }
                         Err(error) => {
                             match error.kind() {
@@ -175,6 +259,31 @@ async fn io_tasks(args: Args) {
                     }
                 },
             };
+
+            // update the text and cursor positions if they've changed
+            stdout.flush().unwrap();
+
+            match &event_type {
+                EventType::Menu => menu_state.cursor_position = cursor::position().unwrap(),
+                EventType::SerialRX => serial_rx_cursor_position = cursor::position().unwrap(),
+                EventType::Initial => {}
+            };
+
+            // update the position of the cursor
+            if menu_state.is_open {
+                execute!(
+                    stdout,
+                    cursor::MoveTo(menu_state.cursor_position.0, menu_state.cursor_position.1),
+                )
+                .unwrap();
+            } else {
+                execute!(
+                    stdout,
+                    cursor::MoveTo(serial_rx_cursor_position.0, serial_rx_cursor_position.1),
+                )
+                .unwrap();
+            }
+            execute!(stdout, cursor::Show).unwrap();
         }
     }
 }

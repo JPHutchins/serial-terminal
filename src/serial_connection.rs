@@ -5,7 +5,7 @@ use std::{
 
 use crossterm::{
     cursor::{Hide, MoveLeft, MoveUp, Show},
-    execute, queue,
+    queue,
     style::Print,
 };
 use terminal_spinner_data::{SpinnerData, DOTS12};
@@ -26,7 +26,7 @@ pub async fn wait_for_serial_port(args: &Args, error_kind: Option<ErrorKind>) ->
     loop {
         match get_serial_connection(&args) {
             Some(serial_conn) => {
-                execute!(
+                queue!(
                     // clear the animation and move up so log is on next line
                     stdout,
                     MoveLeft(previous_frame_size.try_into().unwrap()),
@@ -35,7 +35,7 @@ pub async fn wait_for_serial_port(args: &Args, error_kind: Option<ErrorKind>) ->
                 )
                 .unwrap();
                 log_to_ui!("Connected to {}", args.port);
-                execute!(stdout, Show).unwrap();
+                queue!(stdout, Show).unwrap();
                 break serial_conn;
             }
             None => {

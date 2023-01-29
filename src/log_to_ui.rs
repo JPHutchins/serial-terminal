@@ -3,7 +3,7 @@ use std::io::stdout;
 use chrono;
 use crossterm::{
     cursor::{Hide, Show},
-    execute,
+    queue,
     style::{
         Color::{DarkGrey, Reset, White},
         Print, SetBackgroundColor, SetForegroundColor,
@@ -19,7 +19,7 @@ macro_rules! log_to_ui {
 pub(crate) use log_to_ui;
 
 pub fn print_log_to_stdout(msg: String) {
-    execute!(
+    queue!(
         stdout(),
         Hide,
         SetBackgroundColor(DarkGrey),
