@@ -153,6 +153,8 @@ async fn io_tasks(args: Args) {
         let mut serial_rx_cursor_position: (u16, u16) = cursor::position().unwrap();
         let mut event_type = EventType::Initial;
 
+        let mut ansi_sequence: Vec<u8> = Vec::with_capacity(10);
+
         'communication: loop {
             let keypress_event = reader.next().fuse();
             let serial_rx_event = serial_conn.read_exact(&mut rx_buf).fuse();
@@ -221,7 +223,29 @@ async fn io_tasks(args: Args) {
                 event = serial_rx_event => {
                     match event {
                         Ok(_) => {
-                            if menu_state.is_open && rx_buf[0] == '\n' as u8 {
+                            event_type = EventType::Initial;
+
+                            if ansi_sequence.len() > 0 { // continue buffering an ANSI sequence
+                                assert_ne!(rx_buf[0], 0x1b); // second escape received
+                                ansi_sequence.push(rx_buf[0]);
+                                if rx_buf[0] == 'm' as u8 { // ANSI color finished
+                                    let ansi_string: String = ansi_sequence
+                                        .iter()
+                                        .map(|&c| c as char)
+                                        .collect();
+
+                                    let (col, row) = serial_rx_cursor_position;
+                                    queue!(
+                                        stdout,
+                                        cursor::MoveTo(col, row),
+                                        Print(ansi_string),
+                                    ).unwrap();
+                                    event_type = EventType::SerialRX;
+                                    ansi_sequence.clear();
+                                }
+                            } else if rx_buf[0] == 0x1b { // begin buffering an ANSI sequence
+                                ansi_sequence.push(0x1b);
+                            } else if menu_state.is_open && rx_buf[0] == '\n' as u8 {
                                 // move to the menu line and clear it
                                 queue!(
                                     stdout,
@@ -234,9 +258,6 @@ async fn io_tasks(args: Args) {
 
                                 // manually set the serial rx cursor up 1 row from the menu
                                 serial_rx_cursor_position = (0, menu_state.cursor_position.1 - 1);
-
-                                // no event, cursor positions handled manually
-                                event_type = EventType::Initial;
                             } else {
                                 let (col, row) = serial_rx_cursor_position;
                                 queue!(
